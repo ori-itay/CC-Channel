@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
 	unsigned long rand_seed = (unsigned int)strtoul(argv[5], NULL, 10);
 	float r;
 	int c_s_fd = -1 , c_r_fd = -1 , i;
-	unsigned int bytes_read, bytes_wrote, notwritten, totalsent, num_sent;
+	unsigned int bytes_wrote, notwritten, totalsent, num_sent, bytes_read, notread, totalread;
 	char chnl_buff_1[BUFF], chnl_buff_2[BUFF];
 	struct sockaddr_in chnl_addr;
 	struct sockaddr_in recv_addr;
@@ -64,8 +64,18 @@ int main(int argc, char** argv) {
 
 
 	while (1) {
-
-		bytes_read = recvfrom(c_s_fd, chnl_buff_1, BUFF, 0, 0, 0);
+		
+		notread = R_C_BUFF;
+		bytes_read = 0;
+		while (notread > 0) {
+			bytes_read = recvfrom(c_s_fd, chnl_buff_1+ bytes_read, BUFF, 0, 0, 0);
+			if (bytes_read == -1) {
+				fprintf(stderr, "%s\n", strerror(errno));
+				exit(1);
+			}
+			totalread += bytes_read;
+			notread -= num_sent;
+		}
 		if (bytes_read <= 0) { break; }
 
 		//manipulate flipping on received bits, change in place in chnl_buff_1
