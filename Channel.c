@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
 
 	while (1) {
 
-		bytes_read = recvfrom(c_s_fd, c_s_fd, BUFF, 0, 0, 0);
+		bytes_read = recvfrom(c_s_fd, chnl_buff_1, BUFF, 0, 0, 0);
 		if (bytes_read <= 0) { break; }
 
 		//manipulate flipping on received bits, change in place in chnl_buff_1
