@@ -2,11 +2,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <winsock2.h>
+#include "winsock2.h"
 #include <ws2tcpip.h>
 #include <math.h>
 #include <windows.h>
 #include <process.h>
+
+#pragma comment(lib, "Ws2_32.lib")
 
 
 #define BUFF_1 64
@@ -39,10 +41,9 @@ int main(int argc, char** argv) {
 	int local_port = (unsigned int)strtoul(argv[1], NULL, 10);
 	int rec_ip_add = (unsigned int)strtoul(argv[2], NULL, 10);
 	int recv_port = (unsigned int)strtoul(argv[3], NULL, 10);
-	double err_prob = (unsigned int)strtoul(argv[4], NULL, 10)*pow(2,-16);
+	double err_prob = (unsigned int)strtoul(argv[4], NULL, 10)*pow(2, -16);
 	unsigned long rand_seed = (unsigned int)strtoul(argv[5], NULL, 10);
 	int c_s_fd = -1, c_r_fd = -1;
-	int notwritten, totalsent, num_sent, bytes_read, notread, totalread;
 	char chnl_buff[BUFF_1];
 	struct sockaddr_in chnl_addr;
 	struct sockaddr_in recv_addr;
@@ -64,28 +65,30 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	if ( 0 != listen(c_s_fd, 10)){
+	if (0 != listen(c_s_fd, 10)) {
 		fprintf(stderr, "%s\n", strerror(errno));
 		return 1;
 	}
-	connfd = accept(c_s_fd, (struct sockaddr*)&peer_addr, addrsize);
-	if (connfd < 0 ){
-		 fprintf(stderr, "%s\n", strerror(errno));
-		 close(connfd);
-		 /* die here? loop? */
+	connfd = accept(c_s_fd, (SOCKADDR*)&peer_addr, addrsize);
+	if (connfd < 0) {
+		fprintf(stderr, "%s\n", strerror(errno));
+		if (shutdown(c_s_fd, SD_BOTH) != 0) {
+			fprintf(stderr, "%s\n", strerror(errno));
+		}
+		/* die here? loop? */
 	}
 
 	/*only for template, change it accordingly - this is for receiving msg from sender and sending back to him */
 	char buffer[1332]; int len;
-	int temp_bytes_read = recv(connfd,buffer,len, 0);
+	int temp_bytes_read = recv(connfd, buffer, len, 0);
 
 	/* sending back to SENDER !!!! (need to actually to be receiver) */
 	char * transmitted_data; int length; int val;
-    if ((val=send(connfd, transmitted_data , length, 0)) < 1 ) {
-        free(transmitted_data);
-        return -1;
-    }
-    /*only for template, change it accordingly - this is for receiving msg from sender and sending back to him */
+	if ((val = send(connfd, transmitted_data, length, 0)) < 1) {
+		free(transmitted_data);
+		return -1;
+	}
+	/*only for template, change it accordingly - this is for receiving msg from sender and sending back to him */
 
 
 
@@ -101,17 +104,15 @@ int main(int argc, char** argv) {
 	cnl_addr.sin_family = AF_INET;
 	cnl_addr.sin_port = htons(recv_port); // htons for endiannes
 	cnl_addr.sin_addr.s_addr = inet_addr(rec_ip_add);
-
-
 	HANDLE thread = CreateThread(NULL, 0, thread_end_listen, &c_r_fd, 0, NULL); */
 
 	while (END_FLAG == 0) {
 		receive_frame(chnl_buff, c_s_fd, BUFF_1);
 		flip_bits(chnl_buff, err_prob);//manipulate flipping on received bits, change in place in chnl_buff
-		send_frame(chnl_buff, c_r_fd, recv_addr, bytes_read);//send to receiver
+		send_frame(chnl_buff, c_r_fd, recv_addr, BUFF_1);//send to receiver
 	}
 
-	send_frame(write_back_buff, c_s_fd, get_sender_ip(connfd), WB_BUFF*sizeof(int)); //write back to sender
+	send_frame((char*)write_back_buff, c_s_fd, get_sender_ip(connfd), WB_BUFF * sizeof(int)); //write back to sender
 
 
 	if (closesocket(c_s_fd) != 0) {
@@ -121,11 +122,11 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
-struct sockaddr_in get_sender_ip(int sockfd){
-    struct sockaddr_in addr;
-    socklen_t addr_size = sizeof(struct sockaddr_in);
-    int res = getpeername(sockfd, (struct sockaddr *)&addr, &addr_size);
-    return addr;
+struct sockaddr_in get_sender_ip(int sockfd) {
+	struct sockaddr_in addr;
+	socklen_t addr_size = sizeof(struct sockaddr_in);
+	int res = getpeername(sockfd, (struct sockaddr *)&addr, &addr_size);
+	return addr;
 }
 
 void Init_Winsock() {
@@ -148,7 +149,7 @@ void flip_bits(char chnl_buff_1[], double err_prob) {
 		mask = 0;
 		for (j = 0; j < 8; j++) {
 			r = (rand() % 101) / 100; // rand num [0,1]
-			flip = r < err_prob ; // 0 -not flip, 1- flip
+			flip = r < err_prob; // 0 -not flip, 1- flip
 			if (flip) {
 				mask = mask | tmp;
 			}
@@ -163,11 +164,11 @@ void flip_bits(char chnl_buff_1[], double err_prob) {
 
 DWORD WINAPI thread_end_listen(void *param) {
 
-	int status, bytes_read, notread;
+	int status;
 	int r_c_fd = *(int*)(param);
 
 	while (END_FLAG == 0) {
-		receive_frame(write_back_buff, r_c_fd, WB_BUFF * sizeof(int));
+		receive_frame((char*)write_back_buff, r_c_fd, WB_BUFF * sizeof(int));
 		status = shutdown(r_c_fd, SD_BOTH);
 		if (status) {
 			printf("Error while closing socket. \n");
