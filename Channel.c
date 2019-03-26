@@ -17,12 +17,18 @@ void flip_bits(char chnl_buff_1[], double err_prob);
 void send_frame(char buff[], int fd, struct sockaddr_in to_addr, int bytes_to_write);
 void receive_frame(char buff[], int fd, int bytes_to_read);
 DWORD WINAPI thread_end_listen(void *param);
+struct sockaddr_in get_sender_ip(int sockfd);
+
+
+
 
 int END_FLAG = 0;
 int write_back_buff[WB_BUFF];
 
 int main(int argc, char** argv) {
 	Init_Winsock();
+	struct sockaddr_in peer_addr;
+	int connfd = -1;
 
 
 	if (argc != 6) {
@@ -42,7 +48,7 @@ int main(int argc, char** argv) {
 	struct sockaddr_in recv_addr;
 
 	srand(rand_seed);
-
+	socklen_t addrsize = sizeof(struct sockaddr_in);
 	//channel - sender socket
 	if ((c_s_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
 		fprintf(stderr, "%s\n", strerror(errno));
@@ -53,12 +59,38 @@ int main(int argc, char** argv) {
 	chnl_addr.sin_addr.s_addr = htonl(INADDR_ANY);	// INADDR_ANY = any local machine address
 	chnl_addr.sin_port = htons(local_port);
 
-	if (0 != bind(c_s_fd, (struct sockaddr*) &chnl_addr, sizeof(struct sockaddr_in))) {
+	if (0 != bind(c_s_fd, (struct sockaddr*) &chnl_addr, addrsize)) {
 		printf("Error : Bind Failed. %s \n", strerror(errno));
 		return 1;
 	}
 
+	if ( 0 != listen(c_s_fd, 10)){
+		fprintf(stderr, "%s\n", strerror(errno));
+		return 1;
+	}
+	connfd = accept(c_s_fd, (struct sockaddr*)&peer_addr, addrsize);
+	if (connfd < 0 ){
+		 fprintf(stderr, "%s\n", strerror(errno));
+		 close(connfd);
+		 /* die here? loop? */
+	}
 
+	/*only for template, change it accordingly - this is for receiving msg from sender and sending back to him */
+	char buffer[1332]; int len;
+	int temp_bytes_read = recv(connfd,buffer,len, 0);
+
+	/* sending back to SENDER !!!! (need to actually to be receiver) */
+	char * transmitted_data; int length; int val;
+    if ((val=send(connfd, transmitted_data , length, 0)) < 1 ) {
+        free(transmitted_data);
+        return -1;
+    }
+    /*only for template, change it accordingly - this is for receiving msg from sender and sending back to him */
+
+
+
+
+/*
 	//channel - receiver socket
 	if ((c_r_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
 		fprintf(stderr, "%s\n", strerror(errno));
@@ -71,15 +103,15 @@ int main(int argc, char** argv) {
 	cnl_addr.sin_addr.s_addr = inet_addr(rec_ip_add);
 
 
-	HANDLE thread = CreateThread(NULL, 0, thread_end_listen, &c_r_fd, 0, NULL);
+	HANDLE thread = CreateThread(NULL, 0, thread_end_listen, &c_r_fd, 0, NULL); */
 
 	while (END_FLAG == 0) {
 		receive_frame(chnl_buff, c_s_fd, BUFF_1);
 		flip_bits(chnl_buff, err_prob);//manipulate flipping on received bits, change in place in chnl_buff
 		send_frame(chnl_buff, c_r_fd, recv_addr, bytes_read);//send to receiver
 	}
-	
-	send_frame(write_back_buff, c_s_fd, sender_addr, WB_BUFF*sizeof(int)); //write back to sender
+
+	send_frame(write_back_buff, c_s_fd, get_sender_ip(connfd), WB_BUFF*sizeof(int)); //write back to sender
 
 
 	if (closesocket(c_s_fd) != 0) {
@@ -89,6 +121,12 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
+struct sockaddr_in get_sender_ip(int sockfd){
+    struct sockaddr_in addr;
+    socklen_t addr_size = sizeof(struct sockaddr_in);
+    int res = getpeername(sockfd, (struct sockaddr *)&addr, &addr_size);
+    return addr;
+}
 
 void Init_Winsock() {
 	WSADATA wsaData;
