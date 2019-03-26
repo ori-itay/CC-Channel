@@ -1,20 +1,25 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
-#include "winsock2.h" 
+#include <string.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <math.h>
+#include <windows.h>
+#include <process.h>
+
 
 #define BUFF_1 64
 #define WB_BUFF 4
 
+void Init_Winsock();
 void flip_bits(char chnl_buff_1[], double err_prob);
-
-struct ARGS {
-	int socket_fd;
-	int buff[WB_BUFF];
-};
+void send_frame(char buff[], int fd, struct sockaddr_in to_addr, int bytes_to_write);
+void receive_frame(char buff[], int fd, int bytes_to_read);
+DWORD WINAPI thread_end_listen(void *param);
 
 int END_FLAG = 0;
+int write_back_buff[WB_BUFF];
 
 int main(int argc, char** argv) {
 	Init_Winsock();
@@ -30,14 +35,11 @@ int main(int argc, char** argv) {
 	int recv_port = (unsigned int)strtoul(argv[3], NULL, 10);
 	double err_prob = (unsigned int)strtoul(argv[4], NULL, 10)*pow(2,-16);
 	unsigned long rand_seed = (unsigned int)strtoul(argv[5], NULL, 10);
-	float r;
-	int c_s_fd = -1, c_r_fd = -1, i;
-	unsigned int bytes_wrote, notwritten, totalsent, num_sent, bytes_read, notread, totalread;
+	int c_s_fd = -1, c_r_fd = -1;
+	int notwritten, totalsent, num_sent, bytes_read, notread, totalread;
 	char chnl_buff[BUFF_1];
-	int write_back_buff[WB_BUFF];
 	struct sockaddr_in chnl_addr;
 	struct sockaddr_in recv_addr;
-	struct fd_set sockets_set;
 
 	srand(rand_seed);
 
@@ -49,7 +51,7 @@ int main(int argc, char** argv) {
 	memset(&chnl_addr, 0, sizeof(struct sockaddr_in));
 	chnl_addr.sin_family = AF_INET;
 	chnl_addr.sin_addr.s_addr = htonl(INADDR_ANY);	// INADDR_ANY = any local machine address
-	chnl_addr.sin_port = htonl(local_port);
+	chnl_addr.sin_port = htons(local_port);
 
 	if (0 != bind(c_s_fd, (struct sockaddr*) &chnl_addr, sizeof(struct sockaddr_in))) {
 		printf("Error : Bind Failed. %s \n", strerror(errno));
@@ -68,54 +70,16 @@ int main(int argc, char** argv) {
 	cnl_addr.sin_port = htons(recv_port); // htons for endiannes
 	cnl_addr.sin_addr.s_addr = inet_addr(rec_ip_add);
 
-	struct ARGS thread_args = { c_r_fd , write_back_buff };
-	HANDLE thread = CreateThread(NULL, 0, thread_end_listen, &thread_args, 0, NULL);
+
+	HANDLE thread = CreateThread(NULL, 0, thread_end_listen, &c_r_fd, 0, NULL);
 
 	while (END_FLAG == 0) {
-
-		notread = BUFF_1;
-		bytes_read = 0;
-		while (notread > 0) {
-			bytes_read = recvfrom(c_s_fd, chnl_buff + bytes_read, BUFF_1, 0, 0, 0);
-			if (bytes_read == -1) {
-				fprintf(stderr, "%s\n", strerror(errno));
-				exit(1);
-			}
-			totalread += bytes_read;
-			notread -= num_sent;
-		}
-		if (bytes_read <= 0) { break; }
-
-		//manipulate flipping on received bits, change in place in chnl_buff_1
-		flip_bits(chnl_buff, err_prob);
-
-		//send to receiver
-		notwritten = bytes_read; //curr num of bytes to write
-		totalsent = 0;
-		while (notwritten > 0) {
-			// notwritten = how much left to write ; totalsent = how much written so far ; num_sent = how much written in last write() call
-			num_sent = sendto(c_r_fd, chnl_buff + totalsent, notwritten, 0, &cnl_addr, sizeof(cnl_addr));
-			if (num_sent == -1) {// check if error occured (server closed connection?)
-				fprintf(stderr, "%s\n", strerror(errno));
-				exit(1);
-			}
-			totalsent += num_sent;
-			notwritten -= num_sent;
-		}
+		receive_frame(chnl_buff, c_s_fd, BUFF_1);
+		flip_bits(chnl_buff, err_prob);//manipulate flipping on received bits, change in place in chnl_buff
+		send_frame(chnl_buff, c_r_fd, recv_addr, bytes_read);//send to receiver
 	}
-
-	//write back to sender
-	notwritten = WB_BUFF; 
-	totalsent = 0;
-	while (notwritten > 0) {
-		num_sent = sendto(c_s_fd, write_back_buff + totalsent, notwritten, 0, &cnl_addr, sizeof(cnl_addr));
-		if (num_sent == -1) {// check if error occured (server closed connection?)
-			fprintf(stderr, "%s\n", strerror(errno));
-			exit(1);
-		}
-		totalsent += num_sent;
-		notwritten -= num_sent;
-	}
+	
+	send_frame(write_back_buff, c_s_fd, sender_addr, WB_BUFF*sizeof(int)); //write back to sender
 
 
 	if (closesocket(c_s_fd) != 0) {
@@ -126,10 +90,19 @@ int main(int argc, char** argv) {
 }
 
 
+void Init_Winsock() {
+	WSADATA wsaData;
+	int iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+	if (iResult != NO_ERROR)
+		printf("Error at WSAStartup()\n");
+	exit(1);
+}
+
 
 void flip_bits(char chnl_buff_1[], double err_prob) {
 
-	int i, j, flip, r;
+	int i, j, flip;
+	double r;
 	char mask, tmp;
 
 	for (i = 0; i < BUFF_1; i++) {
@@ -150,31 +123,49 @@ void flip_bits(char chnl_buff_1[], double err_prob) {
 }
 
 
-
 DWORD WINAPI thread_end_listen(void *param) {
 
-	int status, bytes_read, notread, totalread, num_sent;
-	int recv_buff[] = ((struct ARGS*)param)->buff;
-	int s_c_fd = ((struct ARGS*)param)->socket_fd;
+	int status, bytes_read, notread;
+	int r_c_fd = *(int*)(param);
 
 	while (END_FLAG == 0) {
-		notread = WB_BUFF;
-		bytes_read = 0;
-		while (notread > 0) {
-			bytes_read = recvfrom(s_c_fd, recv_buff + bytes_read, WB_BUFF, 0, 0, 0); //deliver fd and buff as parameter or as global vars
-			if (bytes_read == -1) {
-				fprintf(stderr, "%s\n", strerror(errno));
-				_endthread(1);
-			}
-			totalread += bytes_read;
-			notread -= num_sent;
-		}
-		status = shutdown(s_c_fd, SD_BOTH);
+		receive_frame(write_back_buff, r_c_fd, WB_BUFF * sizeof(int));
+		status = shutdown(r_c_fd, SD_BOTH);
 		if (status) {
 			printf("Error while closing socket. \n");
-			_endthread(1);
+			return 1;
 		}
 		END_FLAG = 1;
 	}
-	_endthread(0);
+	return 0;
+}
+
+
+void send_frame(char buff[], int fd, struct sockaddr_in to_addr, int bytes_to_write) {
+	int totalsent = 0, num_sent = 0;
+
+	while (bytes_to_write > 0 && END_FLAG == 0) {
+		num_sent = sendto(fd, buff + totalsent, bytes_to_write, 0, (SOCKADDR*)&to_addr, sizeof(to_addr));
+		if (num_sent == -1) {
+			fprintf(stderr, "%s\n", strerror(errno));
+			exit(1);
+		}
+		totalsent += num_sent;
+		bytes_to_write -= num_sent;
+	}
+}
+
+
+void receive_frame(char buff[], int fd, int bytes_to_read) {
+	int totalread = 0, bytes_been_read = 0;
+
+	totalread = 0;
+	while (bytes_to_read > 0) {
+		bytes_been_read = recvfrom(fd, (char*)buff + totalread, bytes_to_read, 0, 0, 0);
+		if (bytes_been_read == -1) {
+			fprintf(stderr, "%s\n", strerror(errno));
+			exit(1);
+		}
+		totalread -= bytes_been_read;
+	}
 }
