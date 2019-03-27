@@ -38,10 +38,10 @@ int main(int argc, char** argv) {
 	struct sockaddr_in chnl_addr, recv_addr, sender_addr;
 
 	srand(rand_seed);
-
+	
 	socklen_t addrsize = sizeof(struct sockaddr_in);
 	//channel - receiver - sender socket
-	if ((s_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+	if ((s_fd = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET) {
 		fprintf(stderr, "%s\n", strerror(errno));
 		exit(1);
 	}
@@ -58,9 +58,9 @@ int main(int argc, char** argv) {
 	recv_addr.sin_addr.s_addr = htonl(recv_ip_add);	// INADDR_ANY = any local machine address
 	recv_addr.sin_port = htons(recv_port);
 
-
+	
 	if (bind(s_fd, (struct sockaddr*) &chnl_addr, addrsize) != 0) {
-		printf("Error : Bind Failed. %s \n", strerror(errno));
+		fprintf(stderr, "Bind failed. exiting...\n");
 		exit(1);
 	}
 
@@ -88,9 +88,10 @@ struct sockaddr_in get_sender_ip(int sockfd) {
 void Init_Winsock() {
 	WSADATA wsaData;
 	int iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
-	if (iResult != NO_ERROR)
+	if (iResult != NO_ERROR) {
 		printf("Error at WSAStartup()\n");
-	exit(1);
+		exit(1);
+	}
 }
 
 
