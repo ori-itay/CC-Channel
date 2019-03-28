@@ -55,11 +55,11 @@ int main(int argc, char** argv) {
 	//receiver address
 	memset(&recv_addr, 0, addrsize);
 	recv_addr.sin_family = AF_INET;
-	recv_addr.sin_addr.s_addr = htonl(recv_ip_add);	// INADDR_ANY = any local machine address
+	recv_addr.sin_addr.s_addr = htonl(recv_ip_add);
 	recv_addr.sin_port = htons(recv_port);
 
 	
-	if (bind(s_fd, (struct sockaddr*) &chnl_addr, addrsize) != 0) {
+	if (bind(s_fd, (SOCKADDR *)&chnl_addr, addrsize) != 0) {
 		fprintf(stderr, "Bind failed. exiting...\n");
 		exit(1);
 	}
@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
 	if (closesocket(s_fd) != 0) {
 		fprintf(stderr, "%s\n", strerror(errno));
 	}
-
+	WSACleanup();
 	return 0;
 }
 
@@ -140,7 +140,7 @@ int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *re
 	struct sockaddr_in from_addr;
 
 	memset(buff, '\0', UDP_BUFF);
-	while (bytes_to_read > 0 && END_FLAG == 0) {
+	while (totalread < bytes_to_read && END_FLAG == 0) {
 		bytes_been_read = recvfrom(fd, buff + totalread, bytes_to_read, 0,(struct sockaddr*) &from_addr, &addrsize);
 		if (from_addr.sin_addr.s_addr == recv_addr->sin_addr.s_addr) { // got from receiver
 			END_FLAG = 1;
@@ -152,7 +152,7 @@ int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *re
 			fprintf(stderr, "%s\n", strerror(errno));
 			exit(1);
 		}
-		totalread -= bytes_been_read;
+		totalread += bytes_been_read;
 	}
 	return 0;
 }
