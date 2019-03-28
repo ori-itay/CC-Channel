@@ -1,4 +1,5 @@
 #define _CRT_SECURE_NO_WARNINGS
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,7 @@
 
 #define UDP_BUFF 64
 
+int recvfromTimeOutUDP(SOCKET socket, long sec, long usec);
 void Init_Winsock();
 void flip_bits(char chnl_buff_1[], double err_prob);
 int send_frame(char buff[], int fd, struct sockaddr_in to_addr, int bytes_to_write);
@@ -19,6 +21,7 @@ int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *re
 struct sockaddr_in get_sender_ip(int sockfd);
 
 int END_FLAG = 0;
+int SelectTiming;
 
 int main(int argc, char** argv) {
 	Init_Winsock();
@@ -29,7 +32,7 @@ int main(int argc, char** argv) {
 	}
 
 	unsigned int local_port = (unsigned int)strtoul(argv[1], NULL, 10);
-	unsigned int recv_ip_add = (unsigned int)strtoul(argv[2], NULL, 10);
+	char* recv_ip_add = argv[2];
 	unsigned int recv_port = (unsigned int)strtoul(argv[3], NULL, 10);
 	double err_prob = (unsigned int)strtoul(argv[4], NULL, 10)*pow(2, -16);
 	unsigned int rand_seed = (unsigned int)strtoul(argv[5], NULL, 10);
@@ -53,22 +56,32 @@ int main(int argc, char** argv) {
 	//sender sddress. other feilds determined in receive frame
 	memset(&sender_addr, 0, addrsize);
 	//receiver address
-	memset(&recv_addr, 0, addrsize);
+	memset(&recv_addr, 0, sizeof(recv_addr));
 	recv_addr.sin_family = AF_INET;
-	recv_addr.sin_addr.s_addr = htonl(recv_ip_add);
 	recv_addr.sin_port = htons(recv_port);
+	recv_addr.sin_addr.s_addr = inet_addr(recv_ip_add);
 
 	
 	if (bind(s_fd, (SOCKADDR *)&chnl_addr, addrsize) != 0) {
 		fprintf(stderr, "Bind failed. exiting...\n");
 		exit(1);
 	}
-
+	printf("before select, blocking now..\n");
+	SelectTiming = recvfromTimeOutUDP(s_fd, 100000, 0);
+	printf("socket is ready (after select)\n");
 	while (receive_frame(chnl_buff, s_fd, UDP_BUFF, &recv_addr, &sender_addr) == 0 && END_FLAG == 0) {
+		printf("before flip\n");
 		flip_bits(chnl_buff, err_prob);//manipulate flipping on received bits, change in place in chnl_buff
+		printf("before send\n");
 		send_frame(chnl_buff, s_fd, recv_addr, UDP_BUFF);//send to receiver
+		printf("after send\n");
+		SelectTiming = recvfromTimeOutUDP(s_fd, 100000, 0);
 	}
-
+	printf("out of while \n");
+	/*if (shutdown(s_fd, SD_RECEIVE) != 0) {
+		fprintf(stderr, "socket shutdowm failed. exiting...\n");
+		exit(1);
+	}*/
 	send_frame(chnl_buff, s_fd, sender_addr, UDP_BUFF); //write back to sender
 
 	if (closesocket(s_fd) != 0) {
@@ -78,12 +91,6 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
-struct sockaddr_in get_sender_ip(int sockfd) {
-	struct sockaddr_in addr;
-	socklen_t addr_size = sizeof(struct sockaddr_in);
-	int res = getpeername(sockfd, (struct sockaddr *)&addr, &addr_size);
-	return addr;
-}
 
 void Init_Winsock() {
 	WSADATA wsaData;
@@ -120,13 +127,17 @@ void flip_bits(char chnl_buff_1[], double err_prob) {
 
 
 int send_frame(char buff[], int fd, struct sockaddr_in to_addr, int bytes_to_write) {
-	int totalsent = 0, num_sent = 0;
+	int totalsent = 0, num_sent = 0, new_socket;
 
 	while (bytes_to_write > 0) {
-		num_sent = sendto(fd, buff + totalsent, bytes_to_write, 0, (SOCKADDR*)&to_addr, sizeof(to_addr));
+		if ((new_socket = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET) {
+			fprintf(stderr, "%s\n", strerror(errno));
+			exit(1);
+		}
+		num_sent = sendto(new_socket, buff + totalsent , bytes_to_write, 0, (SOCKADDR*)&to_addr, sizeof(to_addr));
 		if (num_sent == -1) {
 			fprintf(stderr, "%s\n", strerror(errno));
-			return -1;
+			exit(1);
 		}
 		totalsent += num_sent;
 		bytes_to_write -= num_sent;
@@ -140,19 +151,58 @@ int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *re
 	struct sockaddr_in from_addr;
 
 	memset(buff, '\0', UDP_BUFF);
-	while (totalread < bytes_to_read && END_FLAG == 0) {
+	while (totalread < bytes_to_read && END_FLAG == 0  && SelectTiming > 0) {
+		printf("in start of while \n");
+		addrsize = sizeof(from_addr);
 		bytes_been_read = recvfrom(fd, buff + totalread, bytes_to_read, 0,(struct sockaddr*) &from_addr, &addrsize);
-		if (from_addr.sin_addr.s_addr == recv_addr->sin_addr.s_addr) { // got from receiver
-			END_FLAG = 1;
-		}
-		else {
-			memcpy(sender_addr, &from_addr, addrsize);
-		}
+		printf("bytes_been_read: %d \n", bytes_been_read);
 		if (bytes_been_read < 0) {
 			fprintf(stderr, "%s\n", strerror(errno));
 			exit(1);
 		}
 		totalread += bytes_been_read;
+		if (from_addr.sin_addr.s_addr == recv_addr->sin_addr.s_addr
+			&& from_addr.sin_port == recv_addr->sin_port) { // got from receiver
+			END_FLAG = 1;
+		}
+		else {
+			memcpy(sender_addr, &from_addr, addrsize);
+		}
+		printf("after comparesion \n");
 	}
 	return 0;
+}
+
+
+int recvfromTimeOutUDP(SOCKET socket, long sec, long usec)
+{
+
+	// Setup timeval variable
+
+	struct timeval timeout;
+
+	struct fd_set fds;
+
+
+
+	timeout.tv_sec = sec;
+
+	timeout.tv_usec = usec;
+
+	// Setup fd_set structure
+
+	FD_ZERO(&fds);
+
+	FD_SET(socket, &fds);
+
+	// Return value:
+
+	// -1: error occurred
+
+	// 0: timed out
+
+	// > 0: data ready to be read
+
+	return select(0, &fds, 0, 0, &timeout);
+
 }
