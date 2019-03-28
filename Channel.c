@@ -15,10 +15,9 @@
 
 int recvfromTimeOutUDP(SOCKET socket, long sec, long usec);
 void Init_Winsock();
-void flip_bits(char chnl_buff_1[], double err_prob);
+void flip_bits(char chnl_buff_1[], double err_prob, int *flipped_cnt);
 int send_frame(char buff[], int fd, struct sockaddr_in to_addr, int bytes_to_write);
 int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *recv_addr, struct sockaddr_in *sender_addr);
-struct sockaddr_in get_sender_ip(int sockfd);
 
 int END_FLAG = 0;
 int SelectTiming;
@@ -34,9 +33,9 @@ int main(int argc, char** argv) {
 	unsigned int local_port = (unsigned int)strtoul(argv[1], NULL, 10);
 	char* recv_ip_add = argv[2];
 	unsigned int recv_port = (unsigned int)strtoul(argv[3], NULL, 10);
-	double err_prob = (unsigned int)strtoul(argv[4], NULL, 10)*pow(2, -16);
-	unsigned int rand_seed = (unsigned int)strtoul(argv[5], NULL, 10);
-	int s_fd = -1;
+	double err_prob = (double) (strtoul(argv[4], NULL, 10)*pow(2, -16));
+	int rand_seed = (int) strtoul(argv[5], NULL, 10);
+	int s_fd = -1, flipped_cnt = 0;
 	char chnl_buff[UDP_BUFF];
 	struct sockaddr_in chnl_addr, recv_addr, sender_addr;
 
@@ -66,15 +65,11 @@ int main(int argc, char** argv) {
 		fprintf(stderr, "Bind failed. exiting...\n");
 		exit(1);
 	}
-	printf("before select, blocking now..\n");
+
 	SelectTiming = recvfromTimeOutUDP(s_fd, 100000, 0);
-	printf("socket is ready (after select)\n");
 	while (receive_frame(chnl_buff, s_fd, UDP_BUFF, &recv_addr, &sender_addr) == 0 && END_FLAG == 0) {
-		printf("before flip\n");
-		flip_bits(chnl_buff, err_prob);//manipulate flipping on received bits, change in place in chnl_buff
-		printf("before send\n");
+		flip_bits(chnl_buff, err_prob, &flipped_cnt);//manipulate flipping on received bits, change in place in chnl_buff
 		send_frame(chnl_buff, s_fd, recv_addr, UDP_BUFF);//send to receiver
-		printf("after send\n");
 		SelectTiming = recvfromTimeOutUDP(s_fd, 100000, 0);
 	}
 	printf("out of while \n");
@@ -83,6 +78,12 @@ int main(int argc, char** argv) {
 		exit(1);
 	}*/
 	send_frame(chnl_buff, s_fd, sender_addr, UDP_BUFF); //write back to sender
+
+	char ip_str_1[20] = { 0 }; char ip_str_2[20] = { 0 };
+	inet_ntop(AF_INET, &(sender_addr.sin_addr.s_addr), ip_str_1, 20);
+	inet_ntop(AF_INET, &(recv_addr.sin_addr.s_addr), ip_str_2, 20);
+	printf("sender: %s\nreceiver: %s\n%d bytes, flipped %d bits\n",
+		ip_str_1, ip_str_2, ((int*)chnl_buff)[0], flipped_cnt);
 
 	if (closesocket(s_fd) != 0) {
 		fprintf(stderr, "%s\n", strerror(errno));
@@ -102,7 +103,7 @@ void Init_Winsock() {
 }
 
 
-void flip_bits(char chnl_buff_1[], double err_prob) {
+void flip_bits(char chnl_buff_1[], double err_prob, int *flipped_cnt) {
 
 	int i, j, flip;
 	double r;
@@ -112,9 +113,10 @@ void flip_bits(char chnl_buff_1[], double err_prob) {
 		tmp = 1;
 		mask = 0;
 		for (j = 0; j < 8; j++) {
-			r = (rand() % 101) / 100; // rand num [0,1]
+			r = (rand() % 101) / 100.0; // rand num [0,1]
 			flip = r < err_prob; // 0 -not flip, 1- flip
 			if (flip) {
+				(*flipped_cnt)++;
 				mask = mask | tmp;
 			}
 			tmp <<= 1; //left shift by 1 position
@@ -127,14 +129,10 @@ void flip_bits(char chnl_buff_1[], double err_prob) {
 
 
 int send_frame(char buff[], int fd, struct sockaddr_in to_addr, int bytes_to_write) {
-	int totalsent = 0, num_sent = 0, new_socket;
+	int totalsent = 0, num_sent = 0;
 
 	while (bytes_to_write > 0) {
-		if ((new_socket = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET) {
-			fprintf(stderr, "%s\n", strerror(errno));
-			exit(1);
-		}
-		num_sent = sendto(new_socket, buff + totalsent , bytes_to_write, 0, (SOCKADDR*)&to_addr, sizeof(to_addr));
+		num_sent = sendto(fd, buff + totalsent , bytes_to_write, 0, (SOCKADDR*)&to_addr, sizeof(to_addr));
 		if (num_sent == -1) {
 			fprintf(stderr, "%s\n", strerror(errno));
 			exit(1);
@@ -161,8 +159,10 @@ int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *re
 			exit(1);
 		}
 		totalread += bytes_been_read;
+		printf("before comparison\n");
 		if (from_addr.sin_addr.s_addr == recv_addr->sin_addr.s_addr
 			&& from_addr.sin_port == recv_addr->sin_port) { // got from receiver
+			printf("in comparison\n");
 			END_FLAG = 1;
 		}
 		else {
