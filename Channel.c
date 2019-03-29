@@ -15,7 +15,7 @@
 
 int recvfromTimeOutUDP(SOCKET socket, long sec, long usec);
 void Init_Winsock();
-void flip_bits(char chnl_buff_1[], double err_prob, int *flipped_cnt);
+void flip_bits(char chnl_buff[], double err_prob, int *flipped_cnt);
 int send_frame(char buff[], int fd, struct sockaddr_in to_addr, int bytes_to_write);
 int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *recv_addr, struct sockaddr_in *sender_addr);
 
@@ -72,11 +72,7 @@ int main(int argc, char** argv) {
 		send_frame(chnl_buff, s_fd, recv_addr, UDP_BUFF);//send to receiver
 		SelectTiming = recvfromTimeOutUDP(s_fd, 100000, 0);
 	}
-	printf("out of while \n");
-	/*if (shutdown(s_fd, SD_RECEIVE) != 0) {
-		fprintf(stderr, "socket shutdowm failed. exiting...\n");
-		exit(1);
-	}*/
+
 	send_frame(chnl_buff, s_fd, sender_addr, UDP_BUFF); //write back to sender
 
 	char ip_str_1[20] = { 0 }; char ip_str_2[20] = { 0 };
@@ -103,7 +99,7 @@ void Init_Winsock() {
 }
 
 
-void flip_bits(char chnl_buff_1[], double err_prob, int *flipped_cnt) {
+void flip_bits(char chnl_buff[], double err_prob, int *flipped_cnt) {
 
 	int i, j, flip;
 	double r;
@@ -113,15 +109,17 @@ void flip_bits(char chnl_buff_1[], double err_prob, int *flipped_cnt) {
 		tmp = 1;
 		mask = 0;
 		for (j = 0; j < 8; j++) {
+			//printf("i: %d, j: %d\n", i, j);
 			r = (rand() % 101) / 100.0; // rand num [0,1]
 			flip = r < err_prob; // 0 -not flip, 1- flip
 			if (flip) {
+				printf("flipped in index: %d\n", i * 8 + j);
 				(*flipped_cnt)++;
 				mask = mask | tmp;
 			}
 			tmp <<= 1; //left shift by 1 position
 		}
-		chnl_buff_1[i] ^= mask;
+		chnl_buff[i] ^= mask;
 	}
 
 	return;
@@ -150,25 +148,20 @@ int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *re
 
 	memset(buff, '\0', UDP_BUFF);
 	while (totalread < bytes_to_read && END_FLAG == 0  && SelectTiming > 0) {
-		printf("in start of while \n");
 		addrsize = sizeof(from_addr);
 		bytes_been_read = recvfrom(fd, buff + totalread, bytes_to_read, 0,(struct sockaddr*) &from_addr, &addrsize);
-		printf("bytes_been_read: %d \n", bytes_been_read);
 		if (bytes_been_read < 0) {
 			fprintf(stderr, "%s\n", strerror(errno));
 			exit(1);
 		}
 		totalread += bytes_been_read;
-		printf("before comparison\n");
 		if (from_addr.sin_addr.s_addr == recv_addr->sin_addr.s_addr
 			&& from_addr.sin_port == recv_addr->sin_port) { // got from receiver
-			printf("in comparison\n");
 			END_FLAG = 1;
 		}
 		else {
 			memcpy(sender_addr, &from_addr, addrsize);
 		}
-		printf("after comparesion \n");
 	}
 	return 0;
 }
