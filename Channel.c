@@ -15,7 +15,7 @@
 
 int recvfromTimeOutUDP(SOCKET socket, long sec, long usec);
 void Init_Winsock();
-void flip_bits(char chnl_buff[], double err_prob, int *flipped_cnt);
+void flip_bits(char chnl_buff[],int err_prob, int *flipped_cnt);
 int send_frame(char buff[], int fd, struct sockaddr_in to_addr, int bytes_to_write);
 int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *recv_addr, struct sockaddr_in *sender_addr);
 
@@ -33,8 +33,8 @@ int main(int argc, char** argv) {
 	unsigned int local_port = (unsigned int)strtoul(argv[1], NULL, 10);
 	char* recv_ip_add = argv[2];
 	unsigned int recv_port = (unsigned int)strtoul(argv[3], NULL, 10);
-	double err_prob = (double) (strtoul(argv[4], NULL, 10)*pow(2, -16));
-	int rand_seed = (int) strtoul(argv[5], NULL, 10);
+	int err_prob = (int) strtoul(argv[4], NULL, 10);
+	unsigned int rand_seed = (unsigned int) strtoul(argv[5], NULL, 10);
 	int s_fd = -1, flipped_cnt = 0;
 	char chnl_buff[UDP_BUFF];
 	struct sockaddr_in chnl_addr, recv_addr, sender_addr;
@@ -99,21 +99,24 @@ void Init_Winsock() {
 }
 
 
-void flip_bits(char chnl_buff[], double err_prob, int *flipped_cnt) {
+void flip_bits(char chnl_buff[], int err_prob, int *flipped_cnt) {
 
 	int i, j, flip;
-	double r;
+	long double r;
 	char mask, tmp;
-
-	for (i = 0; i < UDP_BUFF; i++) {
+	
+	for (i = 0; i < UDP_BUFF; i++) { //each byte
 		tmp = 1;
 		mask = 0;
-		for (j = 0; j < 8; j++) {
-			//printf("i: %d, j: %d\n", i, j);
-			r = (rand() % 101) / 100.0; // rand num [0,1]
+		for (j = 0; j < 8; j++) { //each bit
+			long double temp = 100;
+			//r = (long double)(rand() % 101) / temp; // rand num [0,1]
+			r = ((float)rand()) / RAND_MAX; // rand num [0,1]
+			r *= pow(2, 16);
 			flip = r < err_prob; // 0 -not flip, 1- flip
+			//printf("err_prob: %d, r: %lf flip: %d\n", err_prob, r, flip);
 			if (flip) {
-				printf("flipped in index: %d\n", i * 8 + j);
+				//printf("flipped in index: %d\n", i * 8 + j);
 				(*flipped_cnt)++;
 				mask = mask | tmp;
 			}
