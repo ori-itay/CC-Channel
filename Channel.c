@@ -8,6 +8,7 @@
 #include <math.h>
 #include <windows.h>
 #include <process.h>
+#include <errno.h>
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -26,7 +27,7 @@ int main(int argc, char** argv) {
 	Init_Winsock();
 
 	if (argc != 6) {
-		printf("Error: not enough arguments were provided!\n");
+		fprintf(stderr, "Error: wrong number of arguments! Exiting...\n");
 		exit(1);
 	}
 
@@ -62,7 +63,7 @@ int main(int argc, char** argv) {
 
 	
 	if (bind(s_fd, (SOCKADDR *)&chnl_addr, addrsize) != 0) {
-		fprintf(stderr, "Bind failed. exiting...\n");
+		fprintf(stderr, "Bind failed. Exiting...\n");
 		exit(1);
 	}
 
@@ -78,11 +79,11 @@ int main(int argc, char** argv) {
 	char ip_str_1[20] = { 0 }; char ip_str_2[20] = { 0 };
 	inet_ntop(AF_INET, &(sender_addr.sin_addr.s_addr), ip_str_1, 20);
 	inet_ntop(AF_INET, &(recv_addr.sin_addr.s_addr), ip_str_2, 20);
-	printf("sender: %s\nreceiver: %s\n%d bytes, flipped %d bits\n",
+	fprintf(stderr, "sender: %s\nreceiver: %s\n%d bytes, flipped %d bits",
 		ip_str_1, ip_str_2, ((int*)chnl_buff)[0], flipped_cnt);
 
 	if (closesocket(s_fd) != 0) {
-		fprintf(stderr, "%s\n", strerror(errno));
+		fprintf(stderr, "Error while closing socket. \n");
 	}
 	WSACleanup();
 	return 0;
@@ -93,7 +94,7 @@ void Init_Winsock() {
 	WSADATA wsaData;
 	int iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
 	if (iResult != NO_ERROR) {
-		printf("Error at WSAStartup()\n");
+		fprintf(stderr, "Error at WSAStartup(). Exiting...\n");
 		exit(1);
 	}
 }
@@ -110,13 +111,10 @@ void flip_bits(char chnl_buff[], int err_prob, int *flipped_cnt) {
 		mask = 0;
 		for (j = 0; j < 8; j++) { //each bit
 			long double temp = 100;
-			//r = (long double)(rand() % 101) / temp; // rand num [0,1]
 			r = ((float)rand()) / RAND_MAX; // rand num [0,1]
 			r *= pow(2, 16);
 			flip = r < err_prob; // 0 -not flip, 1- flip
-			//printf("err_prob: %d, r: %lf flip: %d\n", err_prob, r, flip);
 			if (flip) {
-				//printf("flipped in index: %d\n", i * 8 + j);
 				(*flipped_cnt)++;
 				mask = mask | tmp;
 			}
@@ -124,7 +122,6 @@ void flip_bits(char chnl_buff[], int err_prob, int *flipped_cnt) {
 		}
 		chnl_buff[i] ^= mask;
 	}
-
 	return;
 }
 
@@ -135,8 +132,8 @@ int send_frame(char buff[], int fd, struct sockaddr_in to_addr, int bytes_to_wri
 	while (bytes_to_write > 0) {
 		num_sent = sendto(fd, buff + totalsent , bytes_to_write, 0, (SOCKADDR*)&to_addr, sizeof(to_addr));
 		if (num_sent == -1) {
-			fprintf(stderr, "%s\n", strerror(errno));
-			exit(1);
+			fprintf(stderr, "Error while sending frame.\n");
+			return 0;
 		}
 		totalsent += num_sent;
 		bytes_to_write -= num_sent;
@@ -154,8 +151,8 @@ int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *re
 		addrsize = sizeof(from_addr);
 		bytes_been_read = recvfrom(fd, buff + totalread, bytes_to_read, 0,(struct sockaddr*) &from_addr, &addrsize);
 		if (bytes_been_read < 0) {
-			fprintf(stderr, "%s\n", strerror(errno));
-			exit(1);
+			fprintf(stderr, "Error while receiving frame. \n");
+			return 1;
 		}
 		totalread += bytes_been_read;
 		if (from_addr.sin_addr.s_addr == recv_addr->sin_addr.s_addr
@@ -163,7 +160,7 @@ int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *re
 			END_FLAG = 1;
 		}
 		else {
-			memcpy(sender_addr, &from_addr, addrsize);
+			memcpy(sender_addr, &from_addr, addrsize); //got from sender - copy address
 		}
 	}
 	return 0;
@@ -180,7 +177,6 @@ int recvfromTimeOutUDP(SOCKET socket, long sec, long usec)
 	struct fd_set fds;
 
 
-
 	timeout.tv_sec = sec;
 
 	timeout.tv_usec = usec;
@@ -191,13 +187,6 @@ int recvfromTimeOutUDP(SOCKET socket, long sec, long usec)
 
 	FD_SET(socket, &fds);
 
-	// Return value:
-
-	// -1: error occurred
-
-	// 0: timed out
-
-	// > 0: data ready to be read
 
 	return select(0, &fds, 0, 0, &timeout);
 
