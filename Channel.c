@@ -14,7 +14,7 @@
 
 #define UDP_BUFF 64
 
-int recvfromTimeOutUDP(SOCKET socket, long sec, long usec);
+int recvfromTimeOutUDP(SOCKET socket);
 void Init_Winsock();
 void flip_bits(char chnl_buff[],int err_prob, int *flipped_cnt);
 int send_frame(char buff[], int fd, struct sockaddr_in to_addr, int bytes_to_write);
@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
 	//channel address
 	memset(&chnl_addr, 0, addrsize);
 	chnl_addr.sin_family = AF_INET;
-	chnl_addr.sin_addr.s_addr = htonl(INADDR_ANY);	// INADDR_ANY = any local machine address
+	chnl_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	chnl_addr.sin_port = htons(local_port);
 	//sender sddress. other feilds determined in receive frame
 	memset(&sender_addr, 0, addrsize);
@@ -67,11 +67,11 @@ int main(int argc, char** argv) {
 		exit(1);
 	}
 
-	SelectTiming = recvfromTimeOutUDP(s_fd, 100000, 0);
+	SelectTiming = recvfromTimeOutUDP(s_fd);
 	while (receive_frame(chnl_buff, s_fd, UDP_BUFF, &recv_addr, &sender_addr) == 0 && END_FLAG == 0) {
 		flip_bits(chnl_buff, err_prob, &flipped_cnt);//manipulate flipping on received bits, change in place in chnl_buff
 		send_frame(chnl_buff, s_fd, recv_addr, UDP_BUFF);//send to receiver
-		SelectTiming = recvfromTimeOutUDP(s_fd, 100000, 0);
+		SelectTiming = recvfromTimeOutUDP(s_fd);
 	}
 
 	send_frame(chnl_buff, s_fd, sender_addr, UDP_BUFF); //write back to sender
@@ -167,27 +167,11 @@ int receive_frame(char buff[], int fd, int bytes_to_read, struct sockaddr_in *re
 }
 
 
-int recvfromTimeOutUDP(SOCKET socket, long sec, long usec)
+int recvfromTimeOutUDP(SOCKET socket)
 {
-
-	// Setup timeval variable
-
-	struct timeval timeout;
-
 	struct fd_set fds;
-
-
-	timeout.tv_sec = sec;
-
-	timeout.tv_usec = usec;
-
 	// Setup fd_set structure
-
 	FD_ZERO(&fds);
-
 	FD_SET(socket, &fds);
-
-
-	return select(0, &fds, 0, 0, &timeout);
-
+	return select(socket+1, &fds, NULL, NULL, NULL);
 }
